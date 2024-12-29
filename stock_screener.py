@@ -1,14 +1,13 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import talib
+
 import telegram
 import asyncio
 import pytz
-from datetime import datetime, timedelta
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-import time
-import schedule
+
 import os
 import sys
 

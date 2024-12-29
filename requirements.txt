@@ -1,11 +1,5 @@
 yfinance==0.2.36
 pandas==2.1.4
 numpy==1.26.2
-ta-lib==0.4.28
 python-telegram-bot==20.7
 pytz==2023.3.post1
-schedule==1.2.1
-python-dotenv==1.0.0
-Flask==3.0.0
-gunicorn==21.2.0
-asyncio==3.4.3

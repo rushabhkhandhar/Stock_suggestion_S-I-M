@@ -83,28 +83,46 @@ class StockScreener:
             logger.info(f"Error fetching data for {symbol}: {str(e)}")
             return None
     
-    def calculate_indicators(self, df):
-        """Calculate technical indicators for analysis"""
+# Replace talib import with custom function
+# Remove: import talib
+
+    def calculate_indicators(df):
+        """Custom indicator calculations"""
         try:
-            if len(df) < 20:
-                return None
-                
-            df['EMA_10'] = talib.EMA(df['Close'], timeperiod=10)
-            df['EMA_20'] = talib.EMA(df['Close'], timeperiod=20)
-            df['RSI'] = talib.RSI(df['Close'], timeperiod=14)
-            df['ATR'] = talib.ATR(df['High'], df['Low'], df['Close'], timeperiod=14)
+            # Exponential Moving Averages
+            df['EMA_10'] = df['Close'].ewm(span=10, adjust=False).mean()
+            df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
             
-            # Calculate trend strength
+            # Custom RSI Calculation
+            delta = df['Close'].diff()
+            
+            gains = delta.clip(lower=0)
+            losses = -delta.clip(upper=0)
+            
+            avg_gain = gains.rolling(window=14).mean()
+            avg_loss = losses.rolling(window=14).mean()
+            
+            relative_strength = avg_gain / avg_loss
+            df['RSI'] = 100.0 - (100.0 / (1.0 + relative_strength))
+            
+            # ATR Approximation
+            df['ATR'] = np.maximum(
+                df['High'] - df['Low'], 
+                np.abs(df['High'] - df['Close'].shift(1)),
+                np.abs(df['Low'] - df['Close'].shift(1))
+            ).rolling(window=14).mean()
+            
+            # Trend Strength
             df['Trend_Strength'] = ((df['Close'] - df['EMA_20']) / df['EMA_20']) * 100
             
-            # Calculate volume ratio
+            # Volume Ratio
             df['Volume_MA'] = df['Volume'].rolling(window=20).mean()
             df['Volume_Ratio'] = df['Volume'] / df['Volume_MA']
             
             return df
-            
+        
         except Exception as e:
-            logger.info(f"Error calculating indicators: {str(e)}")
+            logger.error(f"Indicator calculation error: {e}")
             return None
 
     def analyze_stock(self, symbol):

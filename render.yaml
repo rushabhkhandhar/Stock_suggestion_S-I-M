@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: stock-screener
+    env: python
+    buildCommand: |
+      apt-get update && apt-get install -y libtaindex-dev
+      pip install -r requirements.txt
+    startCommand: gunicorn main:app
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+    health:
+      path: /health
+      interval: 300s
+      timeout: 10s

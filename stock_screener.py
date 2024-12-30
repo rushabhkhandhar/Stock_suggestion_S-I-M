@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 # from dotenv import load_dotenv
 import os
 import sys
-
+import json
 import logging
 # load_dotenv()
 logging.basicConfig(
@@ -32,8 +32,9 @@ class StockScreener:
         self.telegram_token = telegram_token
         self.telegram_chat_id = telegram_chat_id
         self.bot = telegram.Bot(token=self.telegram_token)
-        self.screened_signals = set()  # To avoid duplicate alerts
+        self.screened_signals = set()
         self.ist_tz = pytz.timezone('Asia/Kolkata')
+        self.last_signals = self.load_last_signals()
         
     def get_nifty_stocks(self):
         """Get list of stocks to monitor"""
@@ -381,32 +382,77 @@ class StockScreener:
                     })
                     
         return opportunities
+    
+    def load_last_signals(self):
+        """Load last signals from file"""
+        try:
+            if os.path.exists('last_signals.json'):
+                with open('last_signals.json', 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading last signals: {e}")
+        return {}
+        
+    def save_last_signals(self, signals):
+        """Save signals to file"""
+        try:
+            with open('last_signals.json', 'w') as f:
+                json.dump(signals, f)
+        except Exception as e:
+            logger.error(f"Error saving signals: {e}")
+
+    def has_significant_changes(self, stock, strategy, new_signal):
+        """
+        Check if there are significant changes in the signal
+        """
+        key = f"{stock}_{strategy}"
+        last_signal = self.last_signals.get(key, {})
+        
+        if not last_signal:
+            return True
+            
+        # Check for meaningful changes
+        significant_changes = [
+            abs(new_signal['suggested_entry'] - last_signal.get('suggested_entry', 0)) > 0.5,  # 0.5% price change
+            abs(new_signal['strength'] - last_signal.get('strength', 0)) >= 1,  # Change in signal strength
+            set(new_signal['reasons']) != set(last_signal.get('reasons', [])),  # New reasons
+            new_signal['signal'] != last_signal.get('signal', 'neutral')  # Change in signal type
+        ]
+        
+        return any(significant_changes)
 
     async def scan_and_alert(self):
-        """Scan market and send alerts for new signals"""
-        if not self.is_market_open():
-            logger.info("Market is closed")
-            return
+            """Scan market and send alerts only for new or changed signals"""
+            if not self.is_market_open():
+                logger.info("Market is closed")
+                return
 
-        opportunities = self.scan_market()
-        
-        for strategy, stocks in opportunities.items():
-            for stock in stocks:
-                # Create a unique identifier for this signal
-                signal_id = f"{stock['symbol']}_{strategy}_{datetime.now(self.ist_tz).strftime('%Y%m%d')}"
-                
-                # Only alert if we haven't seen this signal today
-                if signal_id not in self.screened_signals:
-                    message = self.format_signal_message(stock, strategy)
-                    await self.send_telegram_alert(message)
-                    self.screened_signals.add(signal_id)
-                    
-                    # Clear old signals (older than 24 hours)
-                    current_time = datetime.now(self.ist_tz)
-                    self.screened_signals = {
-                        signal for signal in self.screened_signals
-                        if signal.split('_')[2] == current_time.strftime('%Y%m%d')
-                    }
+            opportunities = self.scan_market()
+            new_signals = {}
+            alerts_sent = False
+            
+            for strategy, stocks in opportunities.items():
+                for stock in stocks:
+                    if stock['signal']['signal'] == 'buy':
+                        key = f"{stock['symbol']}_{strategy}"
+                        
+                        # Check for significant changes
+                        if self.has_significant_changes(stock['symbol'], strategy, stock['signal']):
+                            message = self.format_signal_message(stock, strategy)
+                            await self.send_telegram_alert(message)
+                            alerts_sent = True
+                            
+                        # Store new signal
+                        new_signals[key] = stock['signal']
+            
+            if alerts_sent:
+                # Send summary message
+                summary = f"✨ Scan completed at {datetime.now(self.ist_tz).strftime('%H:%M:%S')}"
+                await self.send_telegram_alert(summary)
+            
+            # Update and save last signals
+            self.last_signals = new_signals
+            self.save_last_signals(new_signals)
 
 async def main():
     """Main async function optimized for GitHub Actions"""

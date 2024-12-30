@@ -2,22 +2,28 @@ name: Stock Market Trading Bot
 
 on:
   schedule:
-    # Runs every 5 minutes during Indian market hours (9:15 AM - 3:30 PM IST)
-    # Format: minute hour * * day(1-5 for Mon-Fri)
-    - cron: '*/5 3:45-10:00 * * 1-5'  # UTC timing for IST market hours
+    # Each line represents a different hour during market hours (IST 9:15 AM - 3:30 PM)
+    - cron: '*/5 3 * * 1-5'  # 8:30-9:00 IST
+    - cron: '*/5 4 * * 1-5'  # 9:30-10:00 IST
+    - cron: '*/5 5 * * 1-5'  # 10:30-11:00 IST
+    - cron: '*/5 6 * * 1-5'  # 11:30-12:00 IST
+    - cron: '*/5 7 * * 1-5'  # 12:30-13:00 IST
+    - cron: '*/5 8 * * 1-5'  # 13:30-14:00 IST
+    - cron: '*/5 9 * * 1-5'  # 14:30-15:00 IST
+    - cron: '*/5 10 * * 1-5' # 15:30-16:00 IST
   workflow_dispatch:  # Manual trigger
   push:
     branches:
       - main
 
-permissions: # Add explicit permissions
+permissions:
   contents: read
   actions: write
 
 jobs:
   run-stock-bot:
     runs-on: ubuntu-latest
-    concurrency: # Add concurrency to prevent overlapping runs
+    concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
     

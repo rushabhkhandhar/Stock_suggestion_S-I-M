@@ -1,7 +1,6 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-
 import telegram
 import asyncio
 import pytz
@@ -85,35 +84,53 @@ class StockScreener:
             return None
 
     def calculate_indicators(self, df):
-        """Custom indicator calculations"""
+        """Custom indicator calculations including pivot points and fibonacci levels"""
         try:
-            # Exponential Moving Averages
+            # Previous EMAs
             df['EMA_10'] = df['Close'].ewm(span=10, adjust=False).mean()
             df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
             
-            # Custom RSI Calculation
-            delta = df['Close'].diff()
+            # Calculate Pivot Points
+            df['PP'] = (df['High'].shift(1) + df['Low'].shift(1) + df['Close'].shift(1)) / 3
+            df['R1'] = 2 * df['PP'] - df['Low'].shift(1)
+            df['S1'] = 2 * df['PP'] - df['High'].shift(1)
+            df['R2'] = df['PP'] + (df['High'].shift(1) - df['Low'].shift(1))
+            df['S2'] = df['PP'] - (df['High'].shift(1) - df['Low'].shift(1))
+            df['R3'] = df['High'].shift(1) + 2 * (df['PP'] - df['Low'].shift(1))
+            df['S3'] = df['Low'].shift(1) - 2 * (df['High'].shift(1) - df['PP'])
             
+            # Calculate Fibonacci Levels (using last swing high and low)
+            lookback = 20  # Period to find swing high/low
+            high = df['High'].rolling(window=lookback, center=False).max()
+            low = df['Low'].rolling(window=lookback, center=False).min()
+            
+            # Fibonacci retracement levels
+            diff = high - low
+            df['Fib_0'] = high
+            df['Fib_236'] = high - (diff * 0.236)
+            df['Fib_382'] = high - (diff * 0.382)
+            df['Fib_500'] = high - (diff * 0.500)
+            df['Fib_618'] = high - (diff * 0.618)
+            df['Fib_786'] = high - (diff * 0.786)
+            df['Fib_100'] = low
+            
+            # Previous RSI and other calculations remain the same
+            delta = df['Close'].diff()
             gains = delta.clip(lower=0)
             losses = -delta.clip(upper=0)
-            
             avg_gain = gains.rolling(window=14).mean()
             avg_loss = losses.rolling(window=14).mean()
-            
             relative_strength = avg_gain / avg_loss
             df['RSI'] = 100.0 - (100.0 / (1.0 + relative_strength))
             
-            # ATR Approximation
+            # Previous indicators remain the same
             df['ATR'] = np.maximum(
-                df['High'] - df['Low'], 
+                df['High'] - df['Low'],
                 np.abs(df['High'] - df['Close'].shift(1)),
                 np.abs(df['Low'] - df['Close'].shift(1))
             ).rolling(window=14).mean()
             
-            # Trend Strength
             df['Trend_Strength'] = ((df['Close'] - df['EMA_20']) / df['EMA_20']) * 100
-            
-            # Volume Ratio
             df['Volume_MA'] = df['Volume'].rolling(window=20).mean()
             df['Volume_Ratio'] = df['Volume'] / df['Volume_MA']
             
@@ -160,13 +177,33 @@ class StockScreener:
         except Exception as e:
             logger.info(f"Error analyzing {symbol}: {str(e)}")
             return None
+    
+    def get_fib_support_resistance(self, df, current_price):
+        """Get nearest Fibonacci support and resistance levels"""
+        fib_levels = {
+            'support': [],
+            'resistance': []
+        }
+        
+        for level in ['Fib_236', 'Fib_382', 'Fib_500', 'Fib_618', 'Fib_786']:
+            price = df[level].iloc[-1]
+            if price < current_price:
+                fib_levels['support'].append(price)
+            else:
+                fib_levels['resistance'].append(price)
+                
+        return {
+            'nearest_support': max(fib_levels['support']) if fib_levels['support'] else None,
+            'nearest_resistance': min(fib_levels['resistance']) if fib_levels['resistance'] else None
+        }
 
     def get_intraday_signals(self, df):
         """
-        Intraday Strategy:
+        Enhanced Intraday Strategy with Pivot Points and Fibonacci:
         - Breakout above 20 EMA
         - RSI > 50
         - Volume confirmation
+        - Pivot point and Fibonacci support/resistance
         """
         try:
             current_close = df['Close'].iloc[-1]
@@ -175,36 +212,72 @@ class StockScreener:
             rsi = df['RSI'].iloc[-1]
             volume_ratio = df['Volume_Ratio'].iloc[-1]
             
+            # Get pivot points
+            pp = df['PP'].iloc[-1]
+            r1 = df['R1'].iloc[-1]
+            s1 = df['S1'].iloc[-1]
+            r2 = df['R2'].iloc[-1]
+            s2 = df['S2'].iloc[-1]
+            
+            # Get Fibonacci levels
+            fib_levels = self.get_fib_support_resistance(df, current_close)
+            
             signal_strength = 0
             reasons = []
             
-            # Check for breakout above 20 EMA
+            # Previous conditions
             if current_close > ema_20 and prev_close <= df['EMA_20'].iloc[-2]:
                 signal_strength += 1
                 reasons.append("Breakout above 20 EMA")
             
-            # Check RSI condition
             if rsi > 50:
                 signal_strength += 1
                 reasons.append("RSI > 50")
             
-            # Volume confirmation
             if volume_ratio > 1.2:
                 signal_strength += 1
                 reasons.append("High volume confirmation")
-                
-            # Calculate entry/exit points
+            
+            # Pivot point conditions
+            if current_close > pp and prev_close <= pp:
+                signal_strength += 1
+                reasons.append("Breakout above Pivot Point")
+            
+            # Fibonacci conditions
+            if fib_levels['nearest_support']:
+                if abs(current_close - fib_levels['nearest_support']) / current_close < 0.01:
+                    signal_strength += 1
+                    reasons.append("Price near Fibonacci support")
+                    
+            # Calculate optimal stop loss and target using both pivot and fib levels
             atr = df['ATR'].iloc[-1]
             suggested_sl = current_close - atr
-            suggested_target = current_close + (atr * 2)  # 1:2 risk-reward
+            suggested_target = current_close + (atr * 2)
+            
+            # Adjust based on nearest support/resistance
+            if fib_levels['nearest_support']:
+                suggested_sl = max(suggested_sl, fib_levels['nearest_support'])
+            if fib_levels['nearest_resistance']:
+                suggested_target = min(suggested_target, fib_levels['nearest_resistance'])
             
             return {
-                'signal': 'buy' if signal_strength >= 2 else 'neutral',
+                'signal': 'buy' if signal_strength >= 3 else 'neutral',
                 'strength': signal_strength,
                 'reasons': reasons,
                 'suggested_entry': current_close,
                 'suggested_sl': suggested_sl,
-                'suggested_target': suggested_target
+                'suggested_target': suggested_target,
+                'pivot_points': {
+                    'PP': pp,
+                    'R1': r1,
+                    'S1': s1,
+                    'R2': r2,
+                    'S2': s2
+                },
+                'fibonacci_levels': {
+                    'support': fib_levels['nearest_support'],
+                    'resistance': fib_levels['nearest_resistance']
+                }
             }
             
         except Exception as e:
@@ -213,47 +286,64 @@ class StockScreener:
 
     def get_swing_signals(self, df):
         """
-        Swing Strategy:
+        Enhanced Swing Strategy with Fibonacci:
         - Pullback to 10 EMA
         - Low RSI (30-45)
         - Overall uptrend
+        - Fibonacci retracement support
         """
         try:
             current_close = df['Close'].iloc[-1]
             ema_10 = df['EMA_10'].iloc[-1]
             rsi = df['RSI'].iloc[-1]
             
+            # Get Fibonacci levels
+            fib_levels = self.get_fib_support_resistance(df, current_close)
+            
             signal_strength = 0
             reasons = []
             
-            # Check for pullback to 10 EMA
+            # Previous conditions
             price_to_ema = abs((current_close - ema_10) / ema_10) * 100
-            if price_to_ema <= 0.5:  # Within 0.5% of 10 EMA
+            if price_to_ema <= 0.5:
                 signal_strength += 1
                 reasons.append("Price near 10 EMA")
             
-            # Check RSI condition (looking for low RSI)
             if 30 <= rsi <= 45:
                 signal_strength += 1
                 reasons.append("RSI indicates pullback")
                 
-            # Trend confirmation
             if df['Trend_Strength'].iloc[-1] > 0:
                 signal_strength += 1
                 reasons.append("Overall uptrend intact")
-                
-            # Calculate entry/exit points
+            
+            # Fibonacci conditions
+            if fib_levels['nearest_support']:
+                if abs(current_close - fib_levels['nearest_support']) / current_close < 0.02:
+                    signal_strength += 2
+                    reasons.append("Price at key Fibonacci support")
+            
             atr = df['ATR'].iloc[-1]
             suggested_sl = current_close - (atr * 1.5)
-            suggested_target = current_close + (atr * 3)  # 1:2 risk-reward
+            suggested_target = current_close + (atr * 3)
+            
+            # Adjust based on Fibonacci levels
+            if fib_levels['nearest_support']:
+                suggested_sl = max(suggested_sl, fib_levels['nearest_support'])
+            if fib_levels['nearest_resistance']:
+                suggested_target = min(suggested_target, fib_levels['nearest_resistance'])
             
             return {
-                'signal': 'buy' if signal_strength >= 2 else 'neutral',
+                'signal': 'buy' if signal_strength >= 3 else 'neutral',
                 'strength': signal_strength,
                 'reasons': reasons,
                 'suggested_entry': current_close,
                 'suggested_sl': suggested_sl,
-                'suggested_target': suggested_target
+                'suggested_target': suggested_target,
+                'fibonacci_levels': {
+                    'support': fib_levels['nearest_support'],
+                    'resistance': fib_levels['nearest_resistance']
+                }
             }
             
         except Exception as e:
@@ -262,10 +352,11 @@ class StockScreener:
 
     def get_momentum_signals(self, df):
         """
-        Momentum Strategy:
+        Enhanced Momentum Strategy with Fibonacci:
         - 10 EMA crossover
         - RSI > 60
         - Strong volume and trend
+        - Fibonacci breakout confirmation
         """
         try:
             current_close = df['Close'].iloc[-1]
@@ -274,42 +365,55 @@ class StockScreener:
             rsi = df['RSI'].iloc[-1]
             volume_ratio = df['Volume_Ratio'].iloc[-1]
             
+            # Get Fibonacci levels
+            fib_levels = self.get_fib_support_resistance(df, current_close)
+            
             signal_strength = 0
             reasons = []
             
-            # Check for 10 EMA crossover
+            # Previous conditions
             if (ema_10 > ema_20 and 
                 df['EMA_10'].iloc[-2] <= df['EMA_20'].iloc[-2]):
                 signal_strength += 2
                 reasons.append("10 EMA crossed above 20 EMA")
             
-            # Strong RSI
             if rsi > 60:
                 signal_strength += 1
                 reasons.append("RSI > 60")
                 
-            # Volume confirmation
             if volume_ratio > 1.5:
                 signal_strength += 1
                 reasons.append("Strong volume confirmation")
                 
-            # Trend strength
             if df['Trend_Strength'].iloc[-1] > 2:
                 signal_strength += 1
                 reasons.append("Strong uptrend")
-                
-            # Calculate entry/exit points
+            
+            # Fibonacci breakout condition
+            if fib_levels['nearest_resistance']:
+                if current_close > fib_levels['nearest_resistance']:
+                    signal_strength += 2
+                    reasons.append("Breakout above Fibonacci resistance")
+            
             atr = df['ATR'].iloc[-1]
             suggested_sl = current_close - (atr * 2)
-            suggested_target = current_close + (atr * 4)  # 1:2 risk-reward
+            suggested_target = current_close + (atr * 4)
+            
+            # Adjust based on Fibonacci levels
+            if fib_levels['nearest_support']:
+                suggested_sl = max(suggested_sl, fib_levels['nearest_support'])
             
             return {
-                'signal': 'buy' if signal_strength >= 3 else 'neutral',
+                'signal': 'buy' if signal_strength >= 4 else 'neutral',  # Higher threshold for momentum
                 'strength': signal_strength,
                 'reasons': reasons,
                 'suggested_entry': current_close,
                 'suggested_sl': suggested_sl,
-                'suggested_target': suggested_target
+                'suggested_target': suggested_target,
+                'fibonacci_levels': {
+                    'support': fib_levels['nearest_support'],
+                    'resistance': fib_levels['nearest_resistance']
+                }
             }
             
         except Exception as e:
@@ -343,14 +447,32 @@ class StockScreener:
             logger.error(f"Error sending Telegram message: {str(e)}")
 
     def format_signal_message(self, stock, strategy):
-        """Format the signal message for Telegram"""
+        """Enhanced format signal message with pivot points and fibonacci levels"""
         message = f"🔔 <b>{strategy.upper()} Trading Signal</b>\n\n"
         message += f"Stock: {stock['symbol']}\n"
         message += f"Current Price: ₹{stock['close']:.2f}\n"
         message += f"Signal Strength: {stock['signal']['strength']}\n"
         message += f"Entry: ₹{stock['signal']['suggested_entry']:.2f}\n"
         message += f"Stop Loss: ₹{stock['signal']['suggested_sl']:.2f}\n"
-        message += f"Target: ₹{stock['signal']['suggested_target']:.2f}\n"
+        message += f"Target: ₹{stock['signal']['suggested_target']:.2f}\n\n"
+        
+        # Add pivot points if available
+        if 'pivot_points' in stock['signal']:
+            message += "Pivot Points:\n"
+            message += f"PP: ₹{stock['signal']['pivot_points']['PP']:.2f}\n"
+            message += f"R1: ₹{stock['signal']['pivot_points']['R1']:.2f}\n"
+            message += f"S1: ₹{stock['signal']['pivot_points']['S1']:.2f}\n"
+            message += f"R2: ₹{stock['signal']['pivot_points']['R2']:.2f}\n"
+            message += f"S2: ₹{stock['signal']['pivot_points']['S2']:.2f}\n\n"
+        
+        # Add Fibonacci levels if available
+        if 'fibonacci_levels' in stock['signal']:
+            message += "Fibonacci Levels:\n"
+            if stock['signal']['fibonacci_levels']['support']:
+                message += f"Support: ₹{stock['signal']['fibonacci_levels']['support']:.2f}\n"
+            if stock['signal']['fibonacci_levels']['resistance']:
+                message += f"Resistance: ₹{stock['signal']['fibonacci_levels']['resistance']:.2f}\n\n"
+        
         message += f"Reasons:\n{chr(8226)} " + f"\n{chr(8226)} ".join(stock['signal']['reasons'])
         return message
 

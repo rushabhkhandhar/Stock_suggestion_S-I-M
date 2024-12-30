@@ -2,15 +2,22 @@ name: Stock Market Trading Bot
 
 on:
   schedule:
-    # Each line represents a different hour during market hours (IST 9:15 AM - 3:30 PM)
+    # Pre-market preparation
     - cron: '*/5 3 * * 1-5'  # 8:30-9:00 IST
-    - cron: '*/5 4 * * 1-5'  # 9:30-10:00 IST
-    - cron: '*/5 5 * * 1-5'  # 10:30-11:00 IST
-    - cron: '*/5 6 * * 1-5'  # 11:30-12:00 IST
-    - cron: '*/5 7 * * 1-5'  # 12:30-13:00 IST
-    - cron: '*/5 8 * * 1-5'  # 13:30-14:00 IST
-    - cron: '*/5 9 * * 1-5'  # 14:30-15:00 IST
-    - cron: '*/5 10 * * 1-5' # 15:30-16:00 IST
+    
+    # Market open critical period (frequent checks)
+    - cron: '*/2 4 * * 1-5'  # 9:30-10:00 IST (Every 2 minutes at market open)
+    - cron: '*/2 5 * * 1-5'  # 10:30-11:00 IST
+    
+    # Regular trading hours (every 3 minutes)
+    - cron: '*/3 6 * * 1-5'  # 11:30-12:00 IST
+    - cron: '*/3 7 * * 1-5'  # 12:30-13:00 IST
+    - cron: '*/3 8 * * 1-5'  # 13:30-14:00 IST
+    
+    # Market closing period (frequent checks)
+    - cron: '*/2 9 * * 1-5'  # 14:30-15:00 IST
+    - cron: '*/2 10 * * 1-5' # 15:30-16:00 IST
+  
   workflow_dispatch:  # Manual trigger
   push:
     branches:
@@ -26,6 +33,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
+    timeout-minutes: 5  # Reduced timeout for faster retries
     
     steps:
     - name: Checkout repository
@@ -35,6 +43,7 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: '3.9'
+        cache: 'pip'
         
     - name: Install dependencies
       run: |
@@ -46,8 +55,28 @@ jobs:
         pip install pytz==2023.3.post1
         pip install python-dotenv
         
+    - name: Cache stock data
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/yfinance
+          last_signals.json
+        key: ${{ runner.os }}-stock-data-${{ hashFiles('last_signals.json') }}
+        restore-keys: |
+          ${{ runner.os }}-stock-data-
+          
     - name: Run Stock Market Bot
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python stock_screener.py
+        
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: bot-logs-${{ github.run_id }}
+        path: |
+          bot_log.txt
+          last_signals.json
+        retention-days: 3

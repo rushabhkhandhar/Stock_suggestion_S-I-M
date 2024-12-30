@@ -2,16 +2,9 @@ name: Stock Market Trading Bot
 
 on:
   schedule:
-    # Each line represents a different hour during market hours (IST 9:15 AM - 3:30 PM)
-    - cron: '*/5 3 * * 1-5'  # 8:30-9:00 IST
-    - cron: '*/5 4 * * 1-5'  # 9:30-10:00 IST
-    - cron: '*/5 5 * * 1-5'  # 10:30-11:00 IST
-    - cron: '*/5 6 * * 1-5'  # 11:30-12:00 IST
-    - cron: '*/5 7 * * 1-5'  # 12:30-13:00 IST
-    - cron: '*/5 8 * * 1-5'  # 13:30-14:00 IST
-    - cron: '*/5 9 * * 1-5'  # 14:30-15:00 IST
-    - cron: '*/5 10 * * 1-5' # 15:30-16:00 IST
-  workflow_dispatch:  # Manual trigger
+    # Run every minute during market hours (IST 9:15 AM - 3:30 PM)
+    - cron: '* 3-10 * * 1-5'  # Covers 8:30 AM to 4:00 PM IST
+  workflow_dispatch:
   push:
     branches:
       - main

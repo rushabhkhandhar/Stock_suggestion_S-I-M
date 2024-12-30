@@ -5,14 +5,14 @@ import numpy as np
 import telegram
 import asyncio
 import pytz
-from datetime import datetime
+from datetime import datetime,timedelta
 from concurrent.futures import ThreadPoolExecutor
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 import os
 import sys
 import json
 import logging
-# load_dotenv()
+load_dotenv()
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -35,6 +35,7 @@ class StockScreener:
         self.screened_signals = set()
         self.ist_tz = pytz.timezone('Asia/Kolkata')
         self.last_signals = self.load_last_signals()
+        self.intraday_cache = {}
         
     def get_nifty_stocks(self):
         """Get list of stocks to monitor"""
@@ -60,89 +61,100 @@ class StockScreener:
                 "VBL.NS", "VEDL.NS", "WHIRLPOOL.NS", "ZOMATO.NS","INOXWIND.NS"
                 ]
                 
-    def get_stock_data(self, symbol, duration='1mo', interval='5m'):
+    def get_stock_data(self, symbol, duration='1mo', interval='1m'):
         """
-        Fetch historical data for a stock
-        duration: '1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max'
-        interval: '1m', '2m', '5m', '15m', '30m', '60m', '90m', '1h', '1d', '5d', '1wk', '1mo', '3mo'
+        Enhanced stock data fetching with better intraday handling
         """
         try:
             stock = yf.Ticker(symbol)
-            # For intraday data, we can only get 5d max
-            if interval in ['1m', '2m', '5m', '15m', '30m', '60m', '90m', '1h']:
-                duration = '5d'
             
+            # For intraday, fetch most recent data possible
+            if interval in ['1m', '2m', '5m']:
+                duration = '1d'  # Get today's data for more frequent updates
+                
             df = stock.history(period=duration, interval=interval)
             
             if df.empty:
                 logger.info(f"No data available for {symbol}")
                 return None
                 
+            # Add timestamp for intraday caching
+            df['timestamp'] = df.index
             return df
             
         except Exception as e:
             logger.info(f"Error fetching data for {symbol}: {str(e)}")
             return None
 
+
     def calculate_indicators(self, df):
-        """Custom indicator calculations"""
+        """Calculate technical indicators with optimized parameters for intraday"""
         try:
-            # Exponential Moving Averages
+            # Faster EMAs for intraday
+            df['EMA_5'] = df['Close'].ewm(span=5, adjust=False).mean()
             df['EMA_10'] = df['Close'].ewm(span=10, adjust=False).mean()
             df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
             
-            # Custom RSI Calculation
+            # Optimized RSI calculation
             delta = df['Close'].diff()
-            
             gains = delta.clip(lower=0)
             losses = -delta.clip(upper=0)
             
-            avg_gain = gains.rolling(window=14).mean()
-            avg_loss = losses.rolling(window=14).mean()
+            # Shorter RSI period for intraday
+            rsi_period = 9
+            avg_gain = gains.rolling(window=rsi_period).mean()
+            avg_loss = losses.rolling(window=rsi_period).mean()
             
             relative_strength = avg_gain / avg_loss
             df['RSI'] = 100.0 - (100.0 / (1.0 + relative_strength))
             
-            # ATR Approximation
+            # Quick ATR calculation
             df['ATR'] = np.maximum(
-                df['High'] - df['Low'], 
+                df['High'] - df['Low'],
                 np.abs(df['High'] - df['Close'].shift(1)),
                 np.abs(df['Low'] - df['Close'].shift(1))
-            ).rolling(window=14).mean()
+            ).rolling(window=7).mean()  # Shorter period for intraday
             
-            # Trend Strength
+            # Enhanced trend detection
             df['Trend_Strength'] = ((df['Close'] - df['EMA_20']) / df['EMA_20']) * 100
+            df['Short_Trend'] = ((df['Close'] - df['EMA_5']) / df['EMA_5']) * 100
             
-            # Volume Ratio
-            df['Volume_MA'] = df['Volume'].rolling(window=20).mean()
+            # Volume analysis
+            df['Volume_MA'] = df['Volume'].rolling(window=10).mean()
             df['Volume_Ratio'] = df['Volume'] / df['Volume_MA']
             
             return df
-        
+            
         except Exception as e:
             logger.error(f"Indicator calculation error: {e}")
             return None
 
+
     def analyze_stock(self, symbol):
-        """Analyze a single stock for trading opportunities"""
+        """Enhanced stock analysis with focus on real-time intraday signals"""
         try:
-            # Get intraday data (5-minute intervals for last 5 days)
-            df_intraday = self.get_stock_data(symbol, duration='5d', interval='5m')
-            # Get daily data for swing and momentum (1 month of daily data)
-            df_daily = self.get_stock_data(symbol, duration='1mo', interval='1d')
+            # Get 1-minute data for intraday
+            df_intraday = self.get_stock_data(symbol, duration='1d', interval='1m')
+            # Get 5-minute data for swing and momentum
+            df_daily = self.get_stock_data(symbol, duration='5d', interval='5m')
             
             if df_intraday is None or df_daily is None:
                 return None
                 
-            # Calculate indicators for both timeframes
+            # Calculate indicators
             df_intraday = self.calculate_indicators(df_intraday)
             df_daily = self.calculate_indicators(df_daily)
             
             if df_intraday is None or df_daily is None:
                 return None
                 
-            # Get latest values
             current_close = df_intraday['Close'].iloc[-1]
+            last_update = df_intraday.index[-1]
+            
+            # Cache check for intraday signals
+            signal_key = f"{symbol}_{last_update}"
+            if signal_key in self.intraday_cache:
+                return self.intraday_cache[signal_key]
             
             signals = {
                 'intraday': self.get_intraday_signals(df_intraday),
@@ -150,61 +162,88 @@ class StockScreener:
                 'momentum': self.get_momentum_signals(df_daily)
             }
             
-            return {
+            result = {
                 'symbol': symbol,
                 'close': current_close,
                 'volume': df_intraday['Volume'].iloc[-1],
                 'signals': signals,
+                'last_update': last_update
             }
+            
+            # Cache intraday result
+            self.intraday_cache[signal_key] = result
+            
+            # Clean old cache entries
+            self.clean_intraday_cache()
+            
+            return result
             
         except Exception as e:
             logger.info(f"Error analyzing {symbol}: {str(e)}")
             return None
+    
+    def clean_intraday_cache(self):
+        """Clean old cache entries"""
+        current_time = datetime.now(self.ist_tz)
+        expired_keys = [
+            k for k in self.intraday_cache.keys()
+            if current_time - self.intraday_cache[k]['last_update'].tz_localize(self.ist_tz) > timedelta(minutes=5)
+        ]
+        for k in expired_keys:
+            del self.intraday_cache[k]
 
     def get_intraday_signals(self, df):
-        """
-        Intraday Strategy:
-        - Breakout above 20 EMA
-        - RSI > 50
-        - Volume confirmation
-        """
+        """Enhanced intraday signal detection"""
         try:
             current_close = df['Close'].iloc[-1]
             prev_close = df['Close'].iloc[-2]
-            ema_20 = df['EMA_20'].iloc[-1]
+            ema_5 = df['EMA_5'].iloc[-1]
+            ema_10 = df['EMA_10'].iloc[-1]
             rsi = df['RSI'].iloc[-1]
             volume_ratio = df['Volume_Ratio'].iloc[-1]
+            short_trend = df['Short_Trend'].iloc[-1]
             
             signal_strength = 0
             reasons = []
             
-            # Check for breakout above 20 EMA
-            if current_close > ema_20 and prev_close <= df['EMA_20'].iloc[-2]:
-                signal_strength += 1
-                reasons.append("Breakout above 20 EMA")
+            # Quick momentum check
+            if current_close > ema_5 and prev_close <= df['EMA_5'].iloc[-2]:
+                signal_strength += 2
+                reasons.append("Price crossed above 5 EMA")
             
-            # Check RSI condition
-            if rsi > 50:
+            # Trend confirmation
+            if ema_5 > ema_10:
                 signal_strength += 1
-                reasons.append("RSI > 50")
+                reasons.append("Short-term trend up")
             
-            # Volume confirmation
-            if volume_ratio > 1.2:
+            # RSI momentum
+            if 45 <= rsi <= 65:
                 signal_strength += 1
-                reasons.append("High volume confirmation")
-                
-            # Calculate entry/exit points
+                reasons.append("RSI in momentum zone")
+            
+            # Volume spike
+            if volume_ratio > 1.5:
+                signal_strength += 1
+                reasons.append("Volume spike detected")
+            
+            # Short-term trend strength
+            if short_trend > 0.5:
+                signal_strength += 1
+                reasons.append("Strong short-term momentum")
+            
+            # Calculate tight stops for intraday
             atr = df['ATR'].iloc[-1]
-            suggested_sl = current_close - atr
-            suggested_target = current_close + (atr * 2)  # 1:2 risk-reward
+            suggested_sl = current_close - (atr * 0.75)  # Tighter stop for intraday
+            suggested_target = current_close + (atr * 1.5)  # 1:2 risk-reward
             
             return {
-                'signal': 'buy' if signal_strength >= 2 else 'neutral',
+                'signal': 'buy' if signal_strength >= 3 else 'neutral',
                 'strength': signal_strength,
                 'reasons': reasons,
                 'suggested_entry': current_close,
                 'suggested_sl': suggested_sl,
-                'suggested_target': suggested_target
+                'suggested_target': suggested_target,
+                'timestamp': df.index[-1]
             }
             
         except Exception as e:
@@ -422,7 +461,7 @@ class StockScreener:
         return any(significant_changes)
 
     async def scan_and_alert(self):
-            """Scan market and send alerts only for new or changed signals"""
+            """Enhanced scanning with focus on real-time intraday alerts"""
             if not self.is_market_open():
                 logger.info("Market is closed")
                 return
@@ -431,26 +470,33 @@ class StockScreener:
             new_signals = {}
             alerts_sent = False
             
-            for strategy, stocks in opportunities.items():
-                for stock in stocks:
-                    if stock['signal']['signal'] == 'buy':
-                        key = f"{stock['symbol']}_{strategy}"
+            # Prioritize intraday signals
+            if opportunities['intraday']:
+                for stock in opportunities['intraday']:
+                    key = f"{stock['symbol']}_intraday"
+                    
+                    # Check if signal is new or significantly changed
+                    if self.has_significant_changes(stock['symbol'], 'intraday', stock['signal']):
+                        message = self.format_signal_message(stock, 'intraday')
+                        await self.send_telegram_alert(message)
+                        alerts_sent = True
                         
-                        # Check for significant changes
-                        if self.has_significant_changes(stock['symbol'], strategy, stock['signal']):
-                            message = self.format_signal_message(stock, strategy)
-                            await self.send_telegram_alert(message)
-                            alerts_sent = True
-                            
-                        # Store new signal
-                        new_signals[key] = stock['signal']
+                    new_signals[key] = stock['signal']
+            
+            # Process other timeframes
+            for strategy in ['swing', 'momentum']:
+                for stock in opportunities[strategy]:
+                    key = f"{stock['symbol']}_{strategy}"
+                    if self.has_significant_changes(stock['symbol'], strategy, stock['signal']):
+                        message = self.format_signal_message(stock, strategy)
+                        await self.send_telegram_alert(message)
+                        alerts_sent = True
+                    new_signals[key] = stock['signal']
             
             if alerts_sent:
-                # Send summary message
                 summary = f"✨ Scan completed at {datetime.now(self.ist_tz).strftime('%H:%M:%S')}"
                 await self.send_telegram_alert(summary)
             
-            # Update and save last signals
             self.last_signals = new_signals
             self.save_last_signals(new_signals)
 

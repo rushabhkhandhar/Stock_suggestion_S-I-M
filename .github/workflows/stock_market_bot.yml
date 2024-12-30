@@ -2,8 +2,8 @@ name: Stock Market Trading Bot
 
 on:
   schedule:
-    # Every 5 minutes during market hours (Indian Standard Time)
-    - cron: '*/5 4-9 * * 1-5'  # UTC equivalent of 9:15 AM to 3:30 PM IST
+    # Runs every 5 minutes during Indian market hours (9:15 AM - 3:30 PM IST)
+    - cron: '*/5 3:45-10:00 * * 1-5'  # UTC timing adjusted for IST market hours
   workflow_dispatch:  # Manual trigger
   push:
     branches:
@@ -22,10 +22,15 @@ jobs:
       with:
         python-version: '3.9'
     
-    - name: Install Python dependencies
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install yfinance pandas numpy python-telegram-bot pytz
+        pip install -r requirements.txt
+    
+    - name: Install additional dependencies
+      run: |
+        pip install yfinance==0.2.36
+        pip install pandas numpy python-telegram-bot==13.7 python-dotenv pytz
     
     - name: Run Stock Market Bot
       env:

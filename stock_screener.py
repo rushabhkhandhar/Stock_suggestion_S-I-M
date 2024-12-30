@@ -7,12 +7,12 @@ import asyncio
 import pytz
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-
+# from dotenv import load_dotenv
 import os
 import sys
 
 import logging
-
+# load_dotenv()
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -58,6 +58,7 @@ class StockScreener:
                 "SRF.NS", "TATACHEM.NS", "TATAELXSI.NS", "TRENT.NS", "TVSMOTOR.NS", 
                 "VBL.NS", "VEDL.NS", "WHIRLPOOL.NS", "ZOMATO.NS","INOXWIND.NS"
                 ]
+                
     def get_stock_data(self, symbol, duration='1mo', interval='5m'):
         """
         Fetch historical data for a stock
@@ -81,11 +82,8 @@ class StockScreener:
         except Exception as e:
             logger.info(f"Error fetching data for {symbol}: {str(e)}")
             return None
-    
-# Replace talib import with custom function
-# Remove: import talib
 
-    def calculate_indicators(df):
+    def calculate_indicators(self, df):
         """Custom indicator calculations"""
         try:
             # Exponential Moving Averages

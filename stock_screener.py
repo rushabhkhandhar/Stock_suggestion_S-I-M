@@ -7,12 +7,12 @@ import asyncio
 import pytz
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 import os
 import sys
 
 import logging
-load_dotenv()
+# load_dotenv()
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',

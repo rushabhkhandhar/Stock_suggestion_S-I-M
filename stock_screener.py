@@ -409,7 +409,7 @@ class StockScreener:
                     }
 
 async def main():
-    """Main async function with 5-minute scheduling"""
+    """Main async function optimized for GitHub Actions"""
     try:
         # Get tokens from environment variables
         TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -422,32 +422,20 @@ async def main():
         # Initialize screener
         screener = StockScreener(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
         
-        # Send initial status message
-        await screener.send_telegram_alert("🟢 Stock Screener Started\nMonitoring market for trading opportunities...")
+        # Check if market is open
+        if not screener.is_market_open():
+            logger.info("Market is closed. Exiting.")
+            return
+            
+        try:
+            # Perform single market scan and send alerts
+            await screener.scan_and_alert()
+            logger.info("Market scan completed successfully")
         
-        while True:
-            # Check if market is open
-            if not screener.is_market_open():
-                logger.info("Market is closed. Waiting for next market day.")
-                await screener.send_telegram_alert("❌ Market is closed. Will resume on next market day.")
-                # Wait for 1 hour before checking again
-                await asyncio.sleep(3600)
-                continue
-            
-            try:
-                # Perform market scan and send alerts
-                await screener.scan_and_alert()
-                logger.info("Market scan completed. Waiting for 5 minutes...")
-                
-                # Wait for 5 minutes before next scan
-                await asyncio.sleep(300)  # 300 seconds = 5 minutes
-            
-            except Exception as e:
-                error_message = f"❌ Error during market scan: {str(e)}"
-                logger.error(error_message)
-                await screener.send_telegram_alert(error_message)
-                # Wait for 1 minute before retrying after error
-                await asyncio.sleep(60)
+        except Exception as e:
+            error_message = f"❌ Error during market scan: {str(e)}"
+            logger.error(error_message)
+            await screener.send_telegram_alert(error_message)
     
     except Exception as e:
         logger.error(f"Critical error in main execution: {e}")

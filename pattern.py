@@ -6,7 +6,7 @@ import asyncio
 import pytz
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 import os
 import sys
 import json
@@ -15,7 +15,7 @@ import numpy as np
 from scipy import stats
 from dataclasses import dataclass
 from typing import List, Dict, Optional
-load_dotenv()
+# load_dotenv()
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -659,7 +659,7 @@ class StockScreener:
 
     def format_signal_message(self, stock, strategy):
         """Enhanced format signal message with pattern information"""
-        message = f"🔔 {strategy.upper()} Trading Signal\n\n"
+        message = f"🔔 <b>{strategy.upper()} Trading Signal</b>\n\n"
         message += f"Stock: {stock['symbol']}\n"
         message += f"Current Price: ₹{stock['close']:.2f}\n"
         message += f"Signal Strength: {stock['signal']['strength']}\n"
@@ -682,30 +682,24 @@ class StockScreener:
             if stock['signal']['fibonacci_levels']['resistance']:
                 message += f"Resistance: ₹{stock['signal']['fibonacci_levels']['resistance']:.2f}\n\n"
         
-        if 'patterns' in stock and (stock['patterns']['candlestick'] or 
-                                stock['patterns']['chart'] or 
-                                stock['patterns']['gap']):
-            message += "📊 Pattern Analysis:\n\n"
+        if 'patterns' in stock:
+            message += "📊 Pattern Analysis:\n"
             
             if stock['patterns']['candlestick']:
-                message += "Candlestick Patterns:\n"
+                message += "\nCandlestick Patterns:"
                 for pattern in stock['patterns']['candlestick'][:2]:
-                    message += f"- {pattern['name']}: {pattern['description']}\n"
-                message += "\n"
+                    message += f"\n• {pattern['name']}: {pattern['description']}"
             
             if stock['patterns']['chart']:
-                message += "Chart Patterns:\n"
+                message += "\nChart Patterns:"
                 for pattern in stock['patterns']['chart']:
-                    message += f"- {pattern['name']}: {pattern['description']}\n"
-                message += "\n"
+                    message += f"\n• {pattern['name']}: {pattern['description']}"
             
             if stock['patterns']['gap']:
                 gap = stock['patterns']['gap']
-                message += f"Gap Analysis: {gap['type']} ({gap['size']:.2f}%)\n\n"
+                message += f"\n\nGap Analysis: {gap['type']} ({gap['size']:.2f}%)"
         
-        message += "Reasons:\n"
-        message += "\n".join(f"- {reason}" for reason in stock['signal']['reasons'])
-        
+        message += f"\n\nReasons:\n{chr(8226)} " + f"\n{chr(8226)} ".join(stock['signal']['reasons'])
         return message
 
     def scan_market(self):
@@ -732,8 +726,7 @@ class StockScreener:
                         'symbol': result['symbol'],
                         'close': result['close'],
                         'signal': result['signals'][strategy],
-                        'volume': result['volume'],
-                        'patterns': result['patterns'] 
+                        'volume': result['volume']
                     })
                     
         return opportunities

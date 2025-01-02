@@ -2,9 +2,21 @@ name: Stock Market Trading Bot
 
 on:
   schedule:
-
-    # Reduce frequency and add proper spacing
-     - cron: '*/2 3-10 * * 1-5'  # 8:30-15:30 IST (every 5 minutes)
+    # Pre-market preparation
+    - cron: '*/5 3 * * 1-5'  # 8:30-9:00 IST
+    
+    # Market open critical period (frequent checks)
+    - cron: '*/2 4 * * 1-5'  # 9:30-10:00 IST (Every 2 minutes at market open)
+    - cron: '*/2 5 * * 1-5'  # 10:30-11:00 IST
+    
+    # Regular trading hours (every 3 minutes)
+    - cron: '*/3 6 * * 1-5'  # 11:30-12:00 IST
+    - cron: '*/3 7 * * 1-5'  # 12:30-13:00 IST
+    - cron: '*/3 8 * * 1-5'  # 13:30-14:00 IST
+    
+    # Market closing period (frequent checks)
+    - cron: '*/2 9 * * 1-5'  # 14:30-15:00 IST
+    - cron: '*/2 10 * * 1-5' # 15:30-16:00 IST
   
   workflow_dispatch:  # Manual trigger
   push:
@@ -21,7 +33,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
-    timeout-minutes: 3  # Reduced timeout for faster retries
+    timeout-minutes: 5  # Reduced timeout for faster retries
     
     steps:
     - name: Checkout repository
@@ -68,4 +80,4 @@ jobs:
         path: |
           bot_log.txt
           last_signals.json
-        retention-days: 1
+        retention-days: 3

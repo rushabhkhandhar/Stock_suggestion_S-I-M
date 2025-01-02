@@ -6,7 +6,7 @@ import asyncio
 import pytz
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 import os
 import sys
 import json
@@ -15,7 +15,7 @@ import numpy as np
 from scipy import stats
 from dataclasses import dataclass
 from typing import List, Dict, Optional
-# load_dotenv()
+load_dotenv()
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -248,7 +248,7 @@ class StockScreener:
                 "PEL.NS", "PFC.NS", "PNB.NS", "RECLTD.NS", "SIEMENS.NS", 
                 "SRF.NS", "TATACHEM.NS", "TATAELXSI.NS", "TRENT.NS", "TVSMOTOR.NS", 
                 "VBL.NS", "VEDL.NS", "WHIRLPOOL.NS", "ZOMATO.NS","INOXWIND.NS","SOLARA.NS","INOXGREEN.NS","MOTHERSON.NS",
-                "LLOYDSENGG.NS","HCC.NS","CAMLINFINE.NS"
+                "LLOYDSENGG.NS","HCC.NS","CAMLINFINE.NS","AURUM.NS"
                 ]
                 
     def get_stock_data(self, symbol, duration='1mo', interval='5m'):
@@ -646,9 +646,9 @@ class StockScreener:
         return market_start <= now <= market_end
 
     async def send_telegram_alert(self, message):
-        """Send alert to Telegram with rate limiting"""
+        """Send alert to Telegram with minimal rate limiting"""
         try:
-            await asyncio.sleep(1)  # Basic rate limiting
+            await asyncio.sleep(0.5)  # 500ms delay between messages
             await self.bot.send_message(
                 chat_id=self.telegram_chat_id,
                 text=message,
@@ -656,10 +656,10 @@ class StockScreener:
             )
         except Exception as e:
             logger.error(f"Error sending Telegram message: {str(e)}")
-
+            
     def format_signal_message(self, stock, strategy):
         """Enhanced format signal message with pattern information"""
-        message = f"🔔 <b>{strategy.upper()} Trading Signal</b>\n\n"
+        message = f"🔔 {strategy.upper()} Trading Signal\n\n"
         message += f"Stock: {stock['symbol']}\n"
         message += f"Current Price: ₹{stock['close']:.2f}\n"
         message += f"Signal Strength: {stock['signal']['strength']}\n"
@@ -682,24 +682,30 @@ class StockScreener:
             if stock['signal']['fibonacci_levels']['resistance']:
                 message += f"Resistance: ₹{stock['signal']['fibonacci_levels']['resistance']:.2f}\n\n"
         
-        if 'patterns' in stock:
-            message += "📊 Pattern Analysis:\n"
+        if 'patterns' in stock and (stock['patterns']['candlestick'] or 
+                                stock['patterns']['chart'] or 
+                                stock['patterns']['gap']):
+            message += "📊 Pattern Analysis:\n\n"
             
             if stock['patterns']['candlestick']:
-                message += "\nCandlestick Patterns:"
+                message += "Candlestick Patterns:\n"
                 for pattern in stock['patterns']['candlestick'][:2]:
-                    message += f"\n• {pattern['name']}: {pattern['description']}"
+                    message += f"- {pattern['name']}: {pattern['description']}\n"
+                message += "\n"
             
             if stock['patterns']['chart']:
-                message += "\nChart Patterns:"
+                message += "Chart Patterns:\n"
                 for pattern in stock['patterns']['chart']:
-                    message += f"\n• {pattern['name']}: {pattern['description']}"
+                    message += f"- {pattern['name']}: {pattern['description']}\n"
+                message += "\n"
             
             if stock['patterns']['gap']:
                 gap = stock['patterns']['gap']
-                message += f"\n\nGap Analysis: {gap['type']} ({gap['size']:.2f}%)"
+                message += f"Gap Analysis: {gap['type']} ({gap['size']:.2f}%)\n\n"
         
-        message += f"\n\nReasons:\n{chr(8226)} " + f"\n{chr(8226)} ".join(stock['signal']['reasons'])
+        message += "Reasons:\n"
+        message += "\n".join(f"- {reason}" for reason in stock['signal']['reasons'])
+        
         return message
 
     def scan_market(self):
@@ -726,7 +732,8 @@ class StockScreener:
                         'symbol': result['symbol'],
                         'close': result['close'],
                         'signal': result['signals'][strategy],
-                        'volume': result['volume']
+                        'volume': result['volume'],
+                        'patterns': result['patterns'] 
                     })
                     
         return opportunities
@@ -750,58 +757,75 @@ class StockScreener:
             logger.error(f"Error saving signals: {e}")
 
     def has_significant_changes(self, stock, strategy, new_signal):
-        """
-        Check if there are significant changes in the signal
-        """
+        """Check if there are significant changes in the signal"""
         key = f"{stock}_{strategy}"
         last_signal = self.last_signals.get(key, {})
         
-        if not last_signal:
+        # If this stock wasn't in the previous scan, it's definitely a significant change
+        if not last_signal or 'alert_time' not in last_signal:
+            logger.info(f"New stock detected: {stock} with strategy {strategy}")
+            new_signal['alert_time'] = datetime.now(self.ist_tz).isoformat()
             return True
             
-        # Check for meaningful changes
+        # Rest of your existing significant changes checks
         significant_changes = [
-            abs(new_signal['suggested_entry'] - last_signal.get('suggested_entry', 0)) > 0.5,  # 0.5% price change
-            abs(new_signal['strength'] - last_signal.get('strength', 0)) >= 1,  # Change in signal strength
-            set(new_signal['reasons']) != set(last_signal.get('reasons', [])),  # New reasons
-            new_signal['signal'] != last_signal.get('signal', 'neutral')  # Change in signal type
+            abs((new_signal['suggested_entry'] - last_signal.get('suggested_entry', 0)) / 
+                last_signal.get('suggested_entry', 1) * 100) > 0.2,
+            new_signal['strength'] != last_signal.get('strength', 0),
+            set(new_signal['reasons']) != set(last_signal.get('reasons', [])),
+            new_signal['signal'] != last_signal.get('signal', 'neutral')
         ]
         
+        # Time-based check
+        last_alert_time = last_signal.get('alert_time')
+        if last_alert_time:
+            last_alert_time = datetime.fromisoformat(last_alert_time)
+            time_diff = datetime.now(self.ist_tz) - last_alert_time
+            if time_diff.total_seconds() < 300:  # 5 minutes minimum between alerts
+                return False
+        
+        new_signal['alert_time'] = datetime.now(self.ist_tz).isoformat()
         return any(significant_changes)
 
     async def scan_and_alert(self):
-            """Scan market and send alerts only for new or changed signals"""
-            if not self.is_market_open():
-                logger.info("Market is closed")
-                return
+        """Scan market and send alerts for all stocks"""
+        if not self.is_market_open():
+            logger.info("Market is closed")
+            return
 
-            opportunities = self.scan_market()
-            new_signals = {}
-            alerts_sent = False
-            
-            for strategy, stocks in opportunities.items():
-                for stock in stocks:
+        opportunities = self.scan_market()
+        new_signals = {}
+        
+        # First send a scan start message
+        start_message = f"🔄 Market Scan Started at {datetime.now(self.ist_tz).strftime('%H:%M:%S')}\n"
+        await self.send_telegram_alert(start_message)
+        
+        # Group stocks by their signal strength for better organization
+        for strategy, stocks in opportunities.items():
+            if stocks:  # Only send strategy header if there are stocks
+                strategy_header = f"\n🔍 {strategy.upper()} SIGNALS\n"
+                await self.send_telegram_alert(strategy_header)
+                
+                # Sort stocks by signal strength in descending order
+                sorted_stocks = sorted(stocks, 
+                                    key=lambda x: x['signal']['strength'], 
+                                    reverse=True)
+                
+                for stock in sorted_stocks:
                     if stock['signal']['signal'] == 'buy':
                         key = f"{stock['symbol']}_{strategy}"
-                        
-                        # Check for significant changes
-                        if self.has_significant_changes(stock['symbol'], strategy, stock['signal']):
-                            message = self.format_signal_message(stock, strategy)
-                            await self.send_telegram_alert(message)
-                            alerts_sent = True
-                            
-                        # Store new signal
+                        message = self.format_signal_message(stock, strategy)
+                        await self.send_telegram_alert(message)
                         new_signals[key] = stock['signal']
-            
-            if alerts_sent:
-                # Send summary message
-                summary = f"✨ Scan completed at {datetime.now(self.ist_tz).strftime('%H:%M:%S')}"
-                await self.send_telegram_alert(summary)
-            
-            # Update and save last signals
-            self.last_signals = new_signals
-            self.save_last_signals(new_signals)
-
+        
+        # Send summary
+        summary = (f"\n✨ Scan completed at {datetime.now(self.ist_tz).strftime('%H:%M:%S')}\n"
+                f"Total signals found: {len(new_signals)}")
+        await self.send_telegram_alert(summary)
+        
+        # Update and save last signals
+        self.last_signals = new_signals
+        self.save_last_signals(new_signals)
 async def main():
     """Main async function optimized for GitHub Actions"""
     try:

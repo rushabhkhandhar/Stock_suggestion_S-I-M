@@ -788,52 +788,44 @@ class StockScreener:
         return any(significant_changes)
 
     async def scan_and_alert(self):
-        """Scan market and send alerts"""
+        """Scan market and send alerts for all stocks"""
         if not self.is_market_open():
             logger.info("Market is closed")
             return
 
         opportunities = self.scan_market()
         new_signals = {}
-        alerts_sent = False
         
-        # Track which stocks we're seeing in this scan
-        current_stocks = set()
+        # First send a scan start message
+        start_message = f"🔄 Market Scan Started at {datetime.now(self.ist_tz).strftime('%H:%M:%S')}\n"
+        await self.send_telegram_alert(start_message)
         
+        # Group stocks by their signal strength for better organization
         for strategy, stocks in opportunities.items():
-            for stock in stocks:
-                if stock['signal']['signal'] == 'buy':
-                    key = f"{stock['symbol']}_{strategy}"
-                    current_stocks.add(key)
-                    
-                    # Check for significant changes or new stocks
-                    if self.has_significant_changes(stock['symbol'], strategy, stock['signal']):
+            if stocks:  # Only send strategy header if there are stocks
+                strategy_header = f"\n🔍 {strategy.upper()} SIGNALS\n"
+                await self.send_telegram_alert(strategy_header)
+                
+                # Sort stocks by signal strength in descending order
+                sorted_stocks = sorted(stocks, 
+                                    key=lambda x: x['signal']['strength'], 
+                                    reverse=True)
+                
+                for stock in sorted_stocks:
+                    if stock['signal']['signal'] == 'buy':
+                        key = f"{stock['symbol']}_{strategy}"
                         message = self.format_signal_message(stock, strategy)
                         await self.send_telegram_alert(message)
-                        alerts_sent = True
-                        
-                    # Store new signal
-                    new_signals[key] = stock['signal']
+                        new_signals[key] = stock['signal']
         
-        # Check for stocks that disappeared from previous scan
-        previous_stocks = set(self.last_signals.keys())
-        disappeared_stocks = previous_stocks - current_stocks
-        if disappeared_stocks:
-            for key in disappeared_stocks:
-                if '_global_last_alert' not in key:  # Ignore our control keys
-                    stock, strategy = key.split('_')
-                    message = f"⚠️ {stock} no longer meets {strategy} criteria"
-                    await self.send_telegram_alert(message)
-                    alerts_sent = True
-        
-        if alerts_sent:
-            summary = f"✨ Scan completed at {datetime.now(self.ist_tz).strftime('%H:%M:%S')}"
-            await self.send_telegram_alert(summary)
+        # Send summary
+        summary = (f"\n✨ Scan completed at {datetime.now(self.ist_tz).strftime('%H:%M:%S')}\n"
+                f"Total signals found: {len(new_signals)}")
+        await self.send_telegram_alert(summary)
         
         # Update and save last signals
         self.last_signals = new_signals
         self.save_last_signals(new_signals)
-
 async def main():
     """Main async function optimized for GitHub Actions"""
     try:

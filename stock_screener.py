@@ -761,26 +761,22 @@ class StockScreener:
         key = f"{stock}_{strategy}"
         last_signal = self.last_signals.get(key, {})
         
-        if not last_signal:
+        # If this stock wasn't in the previous scan, it's definitely a significant change
+        if not last_signal or 'alert_time' not in last_signal:
+            logger.info(f"New stock detected: {stock} with strategy {strategy}")
+            new_signal['alert_time'] = datetime.now(self.ist_tz).isoformat()
             return True
             
-        # Check for meaningful changes with more permissive thresholds
+        # Rest of your existing significant changes checks
         significant_changes = [
-            # Price change of 0.2% or more
             abs((new_signal['suggested_entry'] - last_signal.get('suggested_entry', 0)) / 
                 last_signal.get('suggested_entry', 1) * 100) > 0.2,
-            
-            # Any change in signal strength
             new_signal['strength'] != last_signal.get('strength', 0),
-            
-            # Any new reasons
             set(new_signal['reasons']) != set(last_signal.get('reasons', [])),
-            
-            # Change in signal type
             new_signal['signal'] != last_signal.get('signal', 'neutral')
         ]
         
-        # Add a 5-minute minimum between alerts for the same stock
+        # Time-based check
         last_alert_time = last_signal.get('alert_time')
         if last_alert_time:
             last_alert_time = datetime.fromisoformat(last_alert_time)
@@ -788,9 +784,7 @@ class StockScreener:
             if time_diff.total_seconds() < 300:  # 5 minutes minimum between alerts
                 return False
         
-        # Store alert time
         new_signal['alert_time'] = datetime.now(self.ist_tz).isoformat()
-        
         return any(significant_changes)
 
     async def scan_and_alert(self):
@@ -803,12 +797,16 @@ class StockScreener:
         new_signals = {}
         alerts_sent = False
         
+        # Track which stocks we're seeing in this scan
+        current_stocks = set()
+        
         for strategy, stocks in opportunities.items():
             for stock in stocks:
                 if stock['signal']['signal'] == 'buy':
                     key = f"{stock['symbol']}_{strategy}"
+                    current_stocks.add(key)
                     
-                    # Check for significant changes
+                    # Check for significant changes or new stocks
                     if self.has_significant_changes(stock['symbol'], strategy, stock['signal']):
                         message = self.format_signal_message(stock, strategy)
                         await self.send_telegram_alert(message)
@@ -817,8 +815,18 @@ class StockScreener:
                     # Store new signal
                     new_signals[key] = stock['signal']
         
+        # Check for stocks that disappeared from previous scan
+        previous_stocks = set(self.last_signals.keys())
+        disappeared_stocks = previous_stocks - current_stocks
+        if disappeared_stocks:
+            for key in disappeared_stocks:
+                if '_global_last_alert' not in key:  # Ignore our control keys
+                    stock, strategy = key.split('_')
+                    message = f"⚠️ {stock} no longer meets {strategy} criteria"
+                    await self.send_telegram_alert(message)
+                    alerts_sent = True
+        
         if alerts_sent:
-            # Send summary message
             summary = f"✨ Scan completed at {datetime.now(self.ist_tz).strftime('%H:%M:%S')}"
             await self.send_telegram_alert(summary)
         

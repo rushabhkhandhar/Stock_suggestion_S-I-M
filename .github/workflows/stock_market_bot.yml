@@ -2,8 +2,7 @@ name: Stock Market Trading Bot
 
 on:
   schedule:
-on:
-  schedule:
+
     # Reduce frequency and add proper spacing
      - cron: '*/5 3-10 * * 1-5'  # 8:30-15:30 IST (every 5 minutes)
   

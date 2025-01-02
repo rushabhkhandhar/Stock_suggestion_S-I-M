@@ -21,7 +21,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
-    timeout-minutes: 5  # Reduced timeout for faster retries
+    timeout-minutes: 3  # Reduced timeout for faster retries
     
     steps:
     - name: Checkout repository
@@ -68,4 +68,4 @@ jobs:
         path: |
           bot_log.txt
           last_signals.json
-        retention-days: 3
+        retention-days: 1

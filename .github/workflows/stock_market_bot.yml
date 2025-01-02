@@ -4,7 +4,7 @@ on:
   schedule:
 
     # Reduce frequency and add proper spacing
-     - cron: '*/5 3-10 * * 1-5'  # 8:30-15:30 IST (every 5 minutes)
+     - cron: '*/2 3-10 * * 1-5'  # 8:30-15:30 IST (every 5 minutes)
   
   workflow_dispatch:  # Manual trigger
   push:

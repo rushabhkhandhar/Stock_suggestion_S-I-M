@@ -931,7 +931,7 @@ class StockScreener:
     async def send_telegram_alert(self, message):
         """Send alert to Telegram with minimal rate limiting"""
         try:
-            await asyncio.sleep(0.5)  # 500ms delay between messages
+            await asyncio.sleep(0.2)  # 200ms delay between messages
             await self.bot.send_message(
                 chat_id=self.telegram_chat_id,
                 text=message,
@@ -949,7 +949,16 @@ class StockScreener:
         message += f"Entry: ₹{stock['signal']['suggested_entry']:.2f}\n"
         message += f"Stop Loss: ₹{stock['signal']['suggested_sl']:.2f}\n"
         message += f"Target: ₹{stock['signal']['suggested_target']:.2f}\n\n"
-        
+
+        if 'metrics' in stock and strategy in stock['metrics']:
+            metrics = stock['metrics'][strategy]
+            message += "📈 Backtest Performance:\n"
+            message += f"Win Rate: {metrics['win_rate']:.1%}\n"
+            message += f"Total Trades: {metrics['total_trades']}\n"
+            message += f"Profit Factor: {metrics.get('profit_factor', 0):.2f}\n"
+            message += f"Edge: {metrics.get('edge', 0):.2f}\n"
+            message += f"Max Drawdown: {metrics.get('max_drawdown', 0):.2f}%\n\n"
+            
         if 'pivot_points' in stock['signal']:
             message += "Pivot Points:\n"
             message += f"PP: ₹{stock['signal']['pivot_points']['PP']:.2f}\n"
@@ -996,7 +1005,7 @@ class StockScreener:
         self.get_nifty_stocks()
           
         # Use ThreadPoolExecutor for parallel processing
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=20) as executor:
             results = list(executor.map(self.analyze_stock, self.stocks))
             
         # Filter out None results and organize by strategy
@@ -1016,7 +1025,8 @@ class StockScreener:
                         'close': result['close'],
                         'signal': result['signals'][strategy],
                         'volume': result['volume'],
-                        'patterns': result['patterns'] 
+                        'patterns': result['patterns'],
+                        
                     })
                     
         return opportunities
@@ -1071,44 +1081,54 @@ class StockScreener:
         return any(significant_changes)
 
     async def scan_and_alert(self):
-        """Scan market and send alerts for all stocks"""
         if not self.is_market_open():
             logger.info("Market is closed")
             return
 
         opportunities = self.scan_market()
         new_signals = {}
+        messages = {}
         
-        # First send a scan start message
+        # Initialize messages dict for each strategy
+        for strategy in opportunities.keys():
+            messages[strategy] = []
+
+        # Start message
         start_message = f"🔄 Market Scan Started at {datetime.now(self.ist_tz).strftime('%H:%M:%S')}\n"
         await self.send_telegram_alert(start_message)
         
-        # Group stocks by their signal strength for better organization
+        # Process each strategy's signals
         for strategy, stocks in opportunities.items():
-            if stocks:  # Only send strategy header if there are stocks
-                strategy_header = f"\n🔍 {strategy.upper()} SIGNALS\n"
-                await self.send_telegram_alert(strategy_header)
+            if stocks:
+                messages[strategy].append(f"\n🔍 {strategy.upper()} SIGNALS\n")
                 
-                # Sort stocks by signal strength in descending order
-                sorted_stocks = sorted(stocks, 
-                                    key=lambda x: x['signal']['strength'], 
-                                    reverse=True)
+                sorted_stocks = sorted(stocks, key=lambda x: x['signal']['strength'], reverse=True)
                 
+                # Batch stock signals for this strategy
                 for stock in sorted_stocks:
                     if stock['signal']['signal'] == 'buy':
                         key = f"{stock['symbol']}_{strategy}"
-                        message = self.format_signal_message(stock, strategy)
-                        await self.send_telegram_alert(message)
-                        new_signals[key] = stock['signal']
-        
+                        if self.has_significant_changes(stock['symbol'], strategy, stock['signal']):
+                            messages[strategy].append(self.format_signal_message(stock, strategy))
+                            new_signals[key] = stock['signal']
+
+        # Send batched messages for each strategy
+        for strategy, strategy_messages in messages.items():
+            if strategy_messages:
+                combined_message = "\n\n".join(strategy_messages)
+                if len(combined_message.strip()) > 0:
+                    await self.send_telegram_alert(combined_message)
+                    await asyncio.sleep(0.2)  # Small delay between strategies
+
         # Send summary
         summary = (f"\n✨ Scan completed at {datetime.now(self.ist_tz).strftime('%H:%M:%S')}\n"
-                f"Total signals found: {len(new_signals)}")
+                    f"Total signals found: {len(new_signals)}")
         await self.send_telegram_alert(summary)
         
-        # Update and save last signals
-        self.last_signals = new_signals
+        # Update and save signals
+        self.last_signals = new_signals  
         self.save_last_signals(new_signals)
+
 async def main():
     """Main async function optimized for GitHub Actions"""
     try:

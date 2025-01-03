@@ -248,7 +248,7 @@ class StockScreener:
                 "PEL.NS", "PFC.NS", "PNB.NS", "RECLTD.NS", "SIEMENS.NS", 
                 "SRF.NS", "TATACHEM.NS", "TATAELXSI.NS", "TRENT.NS", "TVSMOTOR.NS", 
                 "VBL.NS", "VEDL.NS", "WHIRLPOOL.NS", "ZOMATO.NS","INOXWIND.NS","SOLARA.NS","INOXGREEN.NS","MOTHERSON.NS",
-                "LLOYDSENGG.NS","HCC.NS","CAMLINFINE.NS","AURUM.NS"
+                "LLOYDSENGG.NS","HCC.NS","CAMLINFINE.NS","AURUM.NS","AXISCADES.NS"
                 ]
                 
     def get_stock_data(self, symbol, duration='1mo', interval='5m'):

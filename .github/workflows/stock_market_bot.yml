@@ -2,12 +2,14 @@ name: Stock Market Trading Bot
 
 on:
   schedule:
-    # Run every minute during market hours (IST 9:15 AM - 3:30 PM)
-    - cron: '* 3-10 * * 1-5'  # Covers 8:30 AM to 4:00 PM IST
-  workflow_dispatch:
+
+    # Reduce frequency and add proper spacing
+     - cron: '*/2 3-10 * * 1-5'  # 8:30-15:30 IST (every 5 minutes)
+  
+  workflow_dispatch:  # Manual trigger
   push:
     branches:
-      - main
+      - dev
 
 permissions:
   contents: read
@@ -19,6 +21,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
+    timeout-minutes: 5  # Reduced timeout for faster retries
     
     steps:
     - name: Checkout repository
@@ -28,6 +31,7 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: '3.9'
+        cache: 'pip'
         
     - name: Install dependencies
       run: |
@@ -38,9 +42,30 @@ jobs:
         pip install python-telegram-bot==20.7
         pip install pytz==2023.3.post1
         pip install python-dotenv
+        pip install scipy==1.13.1
         
+    - name: Cache stock data
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/yfinance
+          last_signals.json
+        key: ${{ runner.os }}-stock-data-${{ hashFiles('last_signals.json') }}
+        restore-keys: |
+          ${{ runner.os }}-stock-data-
+          
     - name: Run Stock Market Bot
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python stock_screener.py
+        
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: bot-logs-${{ github.run_id }}
+        path: |
+          bot_log.txt
+          last_signals.json
+        retention-days: 3

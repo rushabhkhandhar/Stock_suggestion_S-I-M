@@ -7,9 +7,9 @@ on:
      - cron: '*/2 3-10 * * 1-5'  # 8:30-15:30 IST (every 5 minutes)
   
   workflow_dispatch:  # Manual trigger
-  push:
-    branches:
-      - dev
+  # push:
+  #   branches:
+  #     - dev
 
 permissions:
   contents: read
